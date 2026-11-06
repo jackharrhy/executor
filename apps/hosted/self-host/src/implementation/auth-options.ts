@@ -30,13 +30,18 @@ const Sso = Schema.Struct({
 export const selfHostAuthSettings = Effect.gen(function* () {
   const settings = yield* authSettings;
   // Self-host serves its MCP and API resources and its issuer on its single browser origin.
+  const ssoOnly = yield* Config.Boolean("SSO_ONLY").pipe(Config.withDefault(false));
   const base = {
+    ssoOnly,
     ...settings,
     resourceOrigins: singleResourceOrigin(settings.url),
     issuer: `${settings.url}/api/auth`,
   };
-  const discovery = yield* Config.String("SSO_DISCOVERY_URL").pipe(Config.option);
-  if (Option.isNone(discovery) || discovery.value === "") return { ...base, sso: null };
+  const discovery = yield* ssoOnly
+    ? Config.String("SSO_DISCOVERY_URL").pipe(Config.map(Option.some))
+    : Config.String("SSO_DISCOVERY_URL").pipe(Config.option);
+  if (Option.isNone(discovery) || (discovery.value === "" && !ssoOnly))
+    return { ...base, sso: null };
   const configured = yield* Config.all({
     clientId: Config.String("SSO_CLIENT_ID"),
     clientSecret: Config.Redacted("SSO_CLIENT_SECRET"),
@@ -122,7 +127,19 @@ export const selfHostAuthOptions = (
   const base = authOptions(settings, ipAddressHeaders);
   return {
     ...base,
-    emailAndPassword: { enabled: true, disableSignUp: true },
+    account: { ...base.account, accountLinking: { disableImplicitLinking: true } },
+    emailAndPassword: { enabled: !settings.ssoOnly, disableSignUp: true },
+    // Password management must not leave another local credential entry point.
+    disabledPaths: settings.ssoOnly
+      ? [
+          "/sign-in/email",
+          "/sign-up/email",
+          "/change-password",
+          "/set-password",
+          "/request-password-reset",
+          "/reset-password",
+        ]
+      : [],
     plugins: [
       organization({ disableOrganizationDeletion: true, allowUserToCreateOrganization: false }),
       ...base.plugins,
@@ -140,6 +157,8 @@ export const selfHostAuthOptions = (
                   clientId: settings.sso.clientId,
                   clientSecret: Redacted.value(settings.sso.clientSecret),
                   requireIdTokenVerification: true,
+                  // Signing out of Executor does not sign out other Auth consumers.
+                  disableProviderLogout: true,
                   scopes: ["openid", "email", "profile"],
                 },
               ],

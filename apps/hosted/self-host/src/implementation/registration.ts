@@ -308,7 +308,8 @@ export const selfHostRegistration = (settings: Effect.Success<typeof selfHostAut
             const users = yield* call(() => adapter.count({ model: "user" }));
             const organizations = yield* call(() => adapter.count({ model: "organization" }));
             return ctx.json({
-              setup: users === 0 && organizations === 0,
+              setup: !settings.ssoOnly && users === 0 && organizations === 0,
+              ssoOnly: settings.ssoOnly,
               sso: settings.sso !== null,
             });
           }),
@@ -320,12 +321,20 @@ export const selfHostRegistration = (settings: Effect.Success<typeof selfHostAut
           method: "POST",
           body: credentials.extend({ organizationName: z.string().trim().min(1).max(100) }),
         },
-        (ctx) => register(ctx, ctx.body, { organizationName: ctx.body.organizationName }),
+        (ctx) =>
+          settings.ssoOnly
+            ? run(deny("Password setup is disabled. Sign in through your identity provider."))
+            : register(ctx, ctx.body, { organizationName: ctx.body.organizationName }),
       ),
       registerSelfHost: createAuthEndpoint(
         "/self-host/register",
         { method: "POST", body: credentials.extend({ invitation: z.string().min(1) }) },
-        (ctx) => register(ctx, ctx.body, { invitation: ctx.body.invitation }),
+        (ctx) =>
+          settings.ssoOnly
+            ? run(
+                deny("Password registration is disabled. Sign in through your identity provider."),
+              )
+            : register(ctx, ctx.body, { invitation: ctx.body.invitation }),
       ),
     },
   }) satisfies BetterAuthPlugin;

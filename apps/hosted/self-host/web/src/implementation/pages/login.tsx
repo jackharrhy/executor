@@ -11,7 +11,7 @@ import { Button } from "@executor-js/ui/components/button";
 import { Input } from "@executor-js/ui/components/input";
 import { Cause, Exit, Option } from "effect";
 import { AsyncResult } from "effect/reactivity";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   configurationAtom,
   selfHostSignInAtom,
@@ -21,7 +21,32 @@ import { ssoRefusalExplanation } from "../../contracts/sso.ts";
 import { productTitle, useDocumentTitle } from "@executor-js/ui/hooks/document-title";
 import { SelfHostLoginPending } from "../components/login-pending.tsx";
 
-/** Password login and first-run setup; only an operator-configured SSO button is shown. */
+/** Start SSO once per visit; callback failures require an explicit retry, never a redirect loop. */
+function SsoOnlySignIn({ redirect, error: callbackError }: LoginProps) {
+  const submit = useAtomSet(selfHostSignInAtom, { mode: "promiseExit" });
+  const started = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const start = useCallback(async () => {
+    setError(null);
+    const result = await submit({ kind: "sso", redirect });
+    if (Exit.isFailure(result)) setError("Unable to start Auth sign-in. Try again.");
+  }, [submit, redirect]);
+  useEffect(() => {
+    if (started.current || callbackError) return;
+    started.current = true;
+    void start();
+  }, [start, callbackError]);
+  const message = error ?? (callbackError ? ssoRefusalExplanation(callbackError) : null);
+  if (!message) return <SelfHostLoginPending />;
+  return (
+    <main className="auth-page flex min-h-dvh flex-col items-center justify-center gap-4 p-6">
+      <p role="alert">{message}</p>
+      <Button onClick={() => void start()}>Try Auth again</Button>
+    </main>
+  );
+}
+
+/** Native setup and sign-in, or Auth-only sign-in when the operator disables passwords. */
 export function SelfHostLoginPage({ redirect, error: callbackError }: LoginProps) {
   useDocumentTitle(productTitle("Sign in"));
   const page = usePageUrl();
@@ -68,6 +93,8 @@ export function SelfHostLoginPage({ redirect, error: callbackError }: LoginProps
         <p role="alert">Unable to load sign-in settings. Reload to try again.</p>
       </main>
     );
+  if (config.value.ssoOnly)
+    return <SsoOnlySignIn redirect={redirect} error={callbackError ?? ""} />;
   const invitation = new URL(redirect, page.origin).searchParams.get("invitation");
   const setup = config.value.setup;
   const registration = setup || (joining && invitation !== null);
