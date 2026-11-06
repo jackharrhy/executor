@@ -3,7 +3,7 @@ import { Option, Schema } from "effect";
 import { parseAccountSearch } from "@executor-js/hosted-web/contracts/navigation";
 import { SecurityPending } from "@executor-js/hosted-web/account";
 import { SecurityPage } from "@executor-js/hosted-web/pages/security";
-import { ChangePassword, ChangePasswordPending } from "../components/change-password.tsx";
+import { ChangePassword } from "../components/change-password.tsx";
 import { ConnectSso } from "../components/connect-sso.tsx";
 
 /**
@@ -15,11 +15,7 @@ export const Route = createFileRoute("/account/security")({
     ...parseAccountSearch(search),
     error: Option.getOrUndefined(Schema.decodeUnknownOption(Schema.NonEmptyString)(search.error)),
   }),
-  pendingComponent: () => (
-    <SecurityPending>
-      <ChangePasswordPending />
-    </SecurityPending>
-  ),
+  pendingComponent: SecurityPending,
   component: () => (
     <SecurityPage>
       <ChangePassword />
