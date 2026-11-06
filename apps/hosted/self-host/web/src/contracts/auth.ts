@@ -100,11 +100,15 @@ export const selfHostSignInAtom = BrowserAtoms.fn((input: SelfHostSignIn, get) =
           );
   return action.pipe(
     Effect.withSpan(`ui.auth.${input.kind}`),
+    // SSO leaves this document. Refreshing here remounts auto-login before navigation
+    // finishes, starting another transaction and replacing its state cookie.
     Effect.tap(() =>
-      Effect.sync(() => {
-        invalidate(get, sessionAtom);
-        get.refresh(configurationAtom);
-      }),
+      input.kind === "sso"
+        ? Effect.void
+        : Effect.sync(() => {
+            invalidate(get, sessionAtom);
+            get.refresh(configurationAtom);
+          }),
     ),
     Effect.asVoid,
   );

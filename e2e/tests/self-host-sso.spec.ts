@@ -6,7 +6,7 @@
  */
 import { expect, layer } from "@effect/vitest";
 import { Effect, FileSystem, Schema } from "effect";
-import type { Page } from "playwright";
+import type { Page, Request, Route } from "playwright";
 import { Browser } from "../support/browser.ts";
 import { TestLive, withCase } from "../support/case.ts";
 import { startControlledSelfHost } from "../support/managed-server.ts";
@@ -73,7 +73,7 @@ const startSsoInstance = (mode: IdentityMode) =>
           .then((response) => response.status()),
       ),
     ).toBe(200);
-    return { idp, origin, log: `${instance.directory}/server.log` };
+    return { idp, origin, instance, log: `${instance.directory}/server.log` };
   });
 
 const session = (origin: string) =>
@@ -282,7 +282,7 @@ layer(TestLive, { excludeTestServices: true })("Self-host SSO", (it) => {
       Effect.gen(function* () {
         const browser = yield* Browser;
         // Setup leaves the password owner signed in.
-        const { idp, origin } = yield* startSsoInstance("valid");
+        const { idp, origin, instance } = yield* startSsoInstance("valid");
         const card = (page: Page) =>
           page.getByRole("heading", { name: "Single sign-on", exact: true });
         yield* browser.use("Open Security", (page) => page.goto(`${origin}/account/security`));
@@ -334,6 +334,51 @@ layer(TestLive, { excludeTestServices: true })("Self-host SSO", (it) => {
               !url.pathname.startsWith("/api/"),
           ),
         );
+        expect(yield* session(origin)).toEqual({
+          user: expect.objectContaining({ email: "owner@sso.example.test", emailVerified: true }),
+        });
+
+        yield* Effect.gen(function* () {
+          yield* serverControl("stop");
+          yield* serverControl("environment", 200, { SSO_ONLY: "true" });
+          yield* serverControl("start");
+        }).pipe(Effect.provideService(Target, instance));
+        // Hold navigation after the start response: a session refresh used to remount
+        // auto-login here and overwrite the first transaction's signed state cookie.
+        const starts = yield* browser.use(
+          "Slow SSO navigation keeps a single transaction",
+          (page) =>
+            page
+              .context()
+              .clearCookies()
+              .then(() => {
+                let starts = 0;
+                const countStart = (request: Request) => {
+                  if (new URL(request.url()).pathname === "/api/auth/sign-in/social") starts++;
+                };
+                const delayAuthorization = (route: Route) =>
+                  new Promise((resolve) => setTimeout(resolve, 1500)).then(() => route.fallback());
+                const authorization = `${idp.issuer}/authorize*`;
+                page.on("request", countStart);
+                return page
+                  .route(authorization, delayAuthorization)
+                  .then(() => page.goto(`${origin}/login`))
+                  .then(() =>
+                    page.waitForURL(
+                      (url) =>
+                        url.origin === origin &&
+                        !url.pathname.startsWith("/login") &&
+                        !url.pathname.startsWith("/api/"),
+                    ),
+                  )
+                  .then(() => starts)
+                  .finally(() => {
+                    page.off("request", countStart);
+                    return page.unroute(authorization, delayAuthorization);
+                  });
+              }),
+        );
+        expect(starts).toBe(1);
         expect(yield* session(origin)).toEqual({
           user: expect.objectContaining({ email: "owner@sso.example.test", emailVerified: true }),
         });
