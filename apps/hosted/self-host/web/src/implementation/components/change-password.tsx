@@ -1,5 +1,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { Exit } from "effect";
+import { AsyncResult } from "effect/reactivity";
+import { configurationAtom } from "../../contracts/auth.ts";
 import { useState } from "react";
 import { Button } from "@executor-js/ui/components/button";
 import { Input } from "@executor-js/ui/components/input";
@@ -37,6 +39,7 @@ export function ChangePasswordPending() {
 
 /** Self-host accounts sign in with a password; the server checks the current one. */
 export function ChangePassword() {
+  const configuration = useAtomValue(configurationAtom);
   const change = useAtomSet(changePasswordAtom, { mode: "promiseExit" });
   const state = useAtomValue(changePasswordAtom);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -44,6 +47,7 @@ export function ChangePassword() {
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const ready = currentPassword.length > 0 && newPassword.length >= minLength;
+  if (!AsyncResult.isSuccess(configuration) || configuration.value.ssoOnly) return null;
   return (
     <Card asChild className={accountSettingClass}>
       <form

@@ -43,7 +43,9 @@ export function ConnectSso({ refused }: { readonly refused: string | undefined }
         </CardTitle>
         <CardDescription>
           {linked
-            ? "Connected. You can sign in with SSO or with your password."
+            ? configuration.value.ssoOnly
+              ? "Connected. Sign-in is managed by your identity provider."
+              : "Connected. You can sign in with SSO or with your password."
             : "Connect your identity provider account to sign in with SSO as well as your password."}
         </CardDescription>
       </CardHeader>
